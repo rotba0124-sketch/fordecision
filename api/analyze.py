@@ -1,49 +1,11 @@
 import json
 import os
-import fitz                     # PyMuPDF — PDF 텍스트 추출
+import fitz  # PyMuPDF
 from openai import OpenAI
 from http.server import BaseHTTPRequestHandler
 
 # 환경변수에서 API 키 로드 (절대 코드에 직접 입력 금지)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-
-class handler(BaseHTTPRequestHandler):
-    """
-    Vercel Python Serverless Function 필수 구조.
-    클래스명은 반드시 소문자 handler 여야 합니다.
-    """
-
-    def do_POST(self):
-        """POST /api/analyze — PDF 텍스트 분석 요청 처리"""
-        try:
-            content_length = int(self.headers["Content-Length"])
-            body = json.loads(self.rfile.read(content_length))
-            pdf_text = body.get("text", "")
-
-            if not pdf_text:
-                self._json({"error": "text 필드가 비어 있습니다"}, 400)
-                return
-
-            result = analyze_pitch_deck(pdf_text)
-            self._json(result, 200)
-
-        except json.JSONDecodeError:
-            self._json({"error": "JSON 파싱 오류"}, 400)
-        except Exception as e:
-            self._json({"error": str(e)}, 500)
-
-    def do_GET(self):
-        """GET /api/analyze — 헬스체크용 (배포 확인에 사용)"""
-        self._json({"status": "ok", "service": "fordecision-api"}, 200)
-
-    def _json(self, data: dict, status: int):
-        """JSON 응답 헬퍼 — CORS 헤더 포함"""
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
 
 
 def analyze_pitch_deck(text: str) -> dict:
@@ -68,7 +30,6 @@ JSON 형식:
   }}
 }}
 """
-
     for _ in range(2):  # 최대 2번 재시도
         try:
             response = client.chat.completions.create(
@@ -80,7 +41,7 @@ JSON 형식:
                     },
                     {"role": "user", "content": prompt}
                 ],
-                response_format={"type": "json_object"}  # JSON 응답 강제
+                response_format={"type": "json_object"}
             )
             result_json = response.choices[0].message.content
             return json.loads(result_json)
@@ -89,6 +50,49 @@ JSON 형식:
         except Exception as e:
             print(f"An unexpected error occurred while calling OpenAI API: {e}")
             return {}
-
-    print("Error: Failed to get a valid JSON response from OpenAI after multiple attempts.")
     return {}
+
+
+class handler(BaseHTTPRequestHandler):
+    """
+    Vercel Python Serverless Function 필수 구조.
+    클래스명은 반드시 소문자 handler 여야 합니다.
+    """
+
+    def do_OPTIONS(self):
+        """OPTIONS — CORS preflight 처리"""
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_POST(self):
+        """POST /api/analyze — PDF 텍스트 분석 요청 처리"""
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length))
+            pdf_text = body.get("text", "")
+
+            if not pdf_text:
+                self._json({"error": "text 필드가 비어 있습니다"}, 400)
+                return
+
+            result = analyze_pitch_deck(pdf_text)
+            self._json(result, 200)
+        except json.JSONDecodeError:
+            self._json({"error": "JSON 파싱 오류"}, 400)
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def do_GET(self):
+        """GET /api/analyze — 헬스체크용"""
+        self._json({"status": "ok", "service": "fordecision-api"}, 200)
+
+    def _json(self, data: dict, status: int):
+        """JSON 응답 헬퍼 — CORS 헤더 포함"""
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
